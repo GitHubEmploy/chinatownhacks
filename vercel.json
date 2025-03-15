@@ -1,8 +1,5 @@
   {
     "rewrites": [
         { "source": "/(.*)", "destination": "/api/index" }
-    ],
-    "config": {
-      "maxLambdaSize": "2000mb"
-    }
+    ]
   }
