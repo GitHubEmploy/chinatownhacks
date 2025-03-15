@@ -1,5 +1,7 @@
-{
-    "rewrites": [
-        { "source": "/(.*)", "destination": "/api/index" }
-    ]
-}
+  {
+    "src": "api/index.py",
+    "use": "@vercel/python",
+    "config": {
+      "maxLambdaSize": "2000mb"
+    }
+  }
