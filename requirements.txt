@@ -1,3 +1,6 @@
 flask
 matplotlib
 requests
+torch
+torchvision
+torchaudio
