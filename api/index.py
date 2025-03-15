@@ -1,99 +1,151 @@
-from flask import Flask, request, jsonify
-import torch
-import torch.nn.functional as F
-import math
+from flask import Flask
+import requests, io, base64, math, random, time
+import matplotlib.pyplot as plt
 
 app = Flask(__name__)
 
-def remove_duplicates(positions, threshold=0.5):
-    unique = []
-    for pos in positions:
-        duplicate = False
-        for u in unique:
-            if torch.norm(torch.tensor(pos) - torch.tensor(u)) < threshold:
-                duplicate = True
-                break
-        if not duplicate:
-            unique.append(pos)
-    return unique
+# Global stats to keep a running average
+running_stats = {
+    "total_requests": 0,
+    "total_delay": 0.0,
+    "total_accuracy": 0.0
+}
 
-def compute_global_position(cam_info, peep_info):
-    cam_x, cam_y, cam_heading = cam_info
-    dist, off_x, off_y = peep_info
-    global_angle = cam_heading + off_x
-    global_x = cam_x + dist * math.cos(global_angle)
-    global_y = cam_y + dist * math.sin(global_angle)
-    global_z = off_y
-    return [global_x, global_y, global_z]
+def generate_sample_data(num_cameras=6):
+    cams = []
+    cam_infos = []  # store camera placements
+    for i in range(num_cameras):
+        num_peeps = random.randint(5, 15)
+        cam_x = random.uniform(0, 10)
+        cam_y = random.uniform(0, 10)
+        base_heading = math.atan2(5.0 - cam_y, 5.0 - cam_x)  # aim roughly at center (5,5)
+        noise = random.uniform(-0.1, 0.1)
+        heading = base_heading + noise
+        cam_infos.append([cam_x, cam_y, heading])
+        feed = []
+        for _ in range(num_peeps):
+            detection_distance = random.gauss(5, 2)
+            detection_off_x = random.gauss(0, 1)
+            detection_off_y = (random.random() - 0.5) * 0.2
+            detection = [cam_x, cam_y, heading, detection_distance, detection_off_x, detection_off_y]
+            feed.append(detection)
+        cams.append(feed)
+    return cams, cam_infos
 
-def localize_people(cams_data, grid_bounds, grid_resolution, kernel_size=5, sigma=1.0, dup_thresh=0.5):
+def compute_accuracy(global_positions, grid_bounds, grid_resolution):
+    # Compute average error between each global position and its grid cell center.
     x_min, x_max, y_min, y_max = grid_bounds
     H, W = grid_resolution
-    pos_list = []
-    for feed in cams_data:
-        if len(feed) == 0:
-            continue
-        cam_info = feed[0][:3]
-        for peep in feed:
-            pos = compute_global_position(cam_info, peep[3:6])
-            pos_list.append([pos[0], pos[1]])
-    pos_list = remove_duplicates(pos_list, threshold=dup_thresh)
-    density = torch.zeros((H, W))
-    for pos in pos_list:
-        x, y = pos
-        xs_norm = (x - x_min) / (x_max - x_min) * (W - 1)
-        ys_norm = (y - y_min) / (y_max - y_min) * (H - 1)
-        x_idx = int(round(xs_norm))
-        y_idx = int(round(ys_norm))
-        if 0 <= x_idx < W and 0 <= y_idx < H:
-            density[y_idx, x_idx] += 1
-    ax = torch.arange(-kernel_size//2 + 1, kernel_size//2 + 1, dtype=torch.float32)
-    xx, yy = torch.meshgrid(ax, ax, indexing='ij')
-    kern = torch.exp(-(xx**2 + yy**2) / (2.0 * sigma**2))
-    kern = kern / torch.sum(kern)
-    kern = kern.unsqueeze(0).unsqueeze(0)
-    density = density.unsqueeze(0).unsqueeze(0)
-    pad = kernel_size // 2
-    smooth_density = F.conv2d(density, kern, padding=pad)
-    return smooth_density.squeeze().tolist()
+    cell_width = (x_max - x_min) / W
+    cell_height = (y_max - y_min) / H
+    max_error = math.sqrt((cell_width/2)**2 + (cell_height/2)**2)
+    errors = []
+    for pos in global_positions:
+        x, y = pos[0], pos[1]
+        # Determine grid indices (using rounding)
+        i = round((x - x_min) / (x_max - x_min) * (W - 1))
+        j = round((y - y_min) / (y_max - y_min) * (H - 1))
+        cell_center_x = x_min + (i + 0.5) * cell_width
+        cell_center_y = y_min + (j + 0.5) * cell_height
+        error = math.sqrt((x - cell_center_x)**2 + (y - cell_center_y)**2)
+        errors.append(error)
+    avg_error = sum(errors) / len(errors) if errors else 0
+    accuracy = max(0, (1 - avg_error / max_error) * 100)
+    return 100-accuracy
 
-def get_global_positions(cams_data, dup_thresh=0.5):
-    pos_list = []
-    for feed in cams_data:
-        if len(feed) == 0:
-            continue
-        cam_info = feed[0][:3]
-        for peep in feed:
-            pos = compute_global_position(cam_info, peep[3:6])
-            pos_list.append(pos)
-    unique = []
-    for pos in pos_list:
-        xy = pos[:2]
-        duplicate = False
-        for u in unique:
-            if math.sqrt((xy[0]-u[0])**2 + (xy[1]-u[1])**2) < dup_thresh:
-                duplicate = True
-                break
-        if not duplicate:
-            unique.append(pos)
-    return unique
-
-@app.route('/calculate', methods=['POST'])
-def calculate():
-    data = request.get_json()
-    cams_data = data.get("cams_data", [])
-    grid_bounds = data.get("grid_bounds", [0.0, 10.0, 0.0, 10.0])
-    grid_resolution = data.get("grid_resolution", [100, 100])
-    dup_thresh = data.get("dup_thresh", 0.5)
-    kernel_size = data.get("kernel_size", 5)
-    sigma = data.get("sigma", 1.0)
+@app.route('/')
+def index():
+    sample_data, cam_infos = generate_sample_data(num_cameras=6)
+    payload = {
+        "cams_data": sample_data,
+        "grid_bounds": [0.0, 10.0, 0.0, 10.0],
+        "grid_resolution": [100, 100],
+        "dup_thresh": 0.5,
+        "kernel_size": 5,
+        "sigma": 1.0
+    }
+    start_time = time.time()
+    response = requests.post("http://localhost:5001/calculate", json=payload)
+    end_time = time.time()
+    latency = end_time - start_time
+    print(f"Request latency: {latency:.3f} seconds")
     
-    heatmap = localize_people(cams_data, grid_bounds, grid_resolution, kernel_size, sigma, dup_thresh)
-    global_positions = get_global_positions(cams_data, dup_thresh)
-    return jsonify({
-        "heatmap": heatmap,
-        "global_positions": global_positions
-    })
+    if response.status_code != 200:
+        return "Error in localization server"
+    data = response.json()
+    heatmap = data.get("heatmap")
+    global_positions = data.get("global_positions")
+    accuracy = compute_accuracy(global_positions, payload["grid_bounds"], payload["grid_resolution"]) if global_positions else 0
+    
+    # Update running averages
+    running_stats["total_requests"] += 1
+    running_stats["total_delay"] += latency
+    running_stats["total_accuracy"] += accuracy
+    avg_delay = running_stats["total_delay"] / running_stats["total_requests"]
+    avg_accuracy = running_stats["total_accuracy"] / running_stats["total_requests"]
+    
+    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+    # Density Heatmap
+    im = axs[0,0].imshow(heatmap, extent=(0.0, 10.0, 0.0, 10.0), origin='lower', cmap='hot')
+    axs[0,0].set_title("Density Heatmap")
+    axs[0,0].set_xlabel("X")
+    axs[0,0].set_ylabel("Y")
+    fig.colorbar(im, ax=axs[0,0])
+    
+    # Global Positions Scatter
+    if global_positions:
+        xs = [pos[0] for pos in global_positions]
+        ys = [pos[1] for pos in global_positions]
+        axs[0,1].scatter(xs, ys, c='red')
+    axs[0,1].set_title("Global Positions")
+    axs[0,1].set_xlabel("X")
+    axs[0,1].set_ylabel("Y")
+    axs[0,1].set_xlim(0,10)
+    axs[0,1].set_ylim(0,10)
+    
+    # Camera Placements Map
+    cam_xs = [info[0] for info in cam_infos]
+    cam_ys = [info[1] for info in cam_infos]
+    axs[1,0].scatter(cam_xs, cam_ys, c='purple', marker='s')
+    for i, info in enumerate(cam_infos):
+        x, y, heading = info
+        dx = math.cos(heading) * 0.5
+        dy = math.sin(heading) * 0.5
+        axs[1,0].arrow(x, y, dx, dy, head_width=0.2, head_length=0.2, fc='black', ec='black')
+        axs[1,0].text(x, y, f'Cam {i+1}', fontsize=9, color='black')
+    axs[1,0].set_title("Camera Placements")
+    axs[1,0].set_xlabel("X")
+    axs[1,0].set_ylabel("Y")
+    axs[1,0].set_xlim(0,10)
+    axs[1,0].set_ylim(0,10)
+    
+    # Additional Plot: Running Averages
+    axs[1,1].axis('off')
+    stats_text = f"Latest Request:\nLatency: {latency:.3f} s\nAccuracy: {accuracy:.1f}%\n\n" \
+                 f"Running Average:\nLatency: {avg_delay:.3f} s\nAccuracy: {avg_accuracy:.1f}%"
+    axs[1,1].text(0.5, 0.5, stats_text, ha='center', va='center', fontsize=12)
+    
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    image_base64 = base64.b64encode(buf.getvalue()).decode('utf8')
+    plt.close(fig)
+    
+    html = f"""
+    <html>
+      <head><title>Heatmap Visualization</title></head>
+      <body>
+        <h1>Heatmap, Global Positions, and Camera Placements</h1>
+        <p>Latest Request Latency: {latency:.3f} seconds<br>
+           Latest Accuracy: {accuracy:.1f}%<br>
+           Running Average Latency: {avg_delay:.3f} seconds<br>
+           Running Average Accuracy: {avg_accuracy:.1f}%</p>
+        <img src="data:image/png;base64,{image_base64}" alt="Visualization">
+      </body>
+    </html>
+    """
+    return html
 
 if __name__ == '__main__':
-    app.run(port=5001)
+    app.run(port=5000)
