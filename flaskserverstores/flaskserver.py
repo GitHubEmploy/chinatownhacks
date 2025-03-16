@@ -3,6 +3,7 @@ import requests, io, base64, math, random, time, datetime
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from langchain_community.llms import Ollama
+import numpy as np
 
 app = Flask(__name__)
 
@@ -215,97 +216,149 @@ def index():
     for sid in range(NUM_STORES):
         store_history[sid].append(current_counts.get(sid, 0))
     
-    import numpy as np
-    fig = plt.figure(figsize=(12, 20))
-    gs = plt.GridSpec(4, 1, height_ratios=[2, 2, 6, 3])
+    fig = plt.figure(figsize=(12, 12))
+    gs = plt.GridSpec(2, 1, height_ratios=[1, 2])
     
-    # Row 0: Density Heatmap with Store Markers.
+    plt.style.use('dark_background')  # Enable dark theme for plots
+    
+    # Row 0: Density Heatmap with Store Markers
     ax0 = fig.add_subplot(gs[0])
     hm_array = np.array(heatmap).reshape((100, 100))
-    im = ax0.imshow(hm_array, extent=(0, 10, 0, 10), origin='lower', cmap='hot')
-    ax0.set_title("Density Heatmap")
-    ax0.set_xlabel("X")
-    ax0.set_ylabel("Y")
+
+    # Adjust the extent to correctly center the heatmap
+    x_min, x_max, y_min, y_max = 0.0, 10.0, 0.0, 10.0  # Ensure grid bounds are correctly used
+    im = ax0.imshow(hm_array, extent=(x_min, x_max, y_min, y_max), origin='lower', cmap='hot', aspect='auto')
+
+    ax0.set_title("Density Heatmap", color='white')
+    ax0.set_xlabel("X", color='white')
+    ax0.set_ylabel("Y", color='white')
+
+    # Plot stores as markers
     sx = [s[0] for s in stores]
     sy = [s[1] for s in stores]
     ax0.scatter(sx, sy, marker='*', s=150, c='cyan', label='Store')
+
+    # Center the visualization
+    ax0.set_xlim(x_min, x_max)
+    ax0.set_ylim(y_min, y_max)
+
     ax0.legend()
     fig.colorbar(im, ax=ax0)
     
-    # Row 1: Actual Global Positions.
-    ax1 = fig.add_subplot(gs[1])
-    ax1.set_title("Actual Global Positions")
-    ax1.set_xlabel("X")
-    ax1.set_ylabel("Y")
-    ax1.set_xlim(0, 10)
-    ax1.set_ylim(0, 10)
-    if global_positions:
-        gx = [p[0] for p in global_positions]
-        gy = [p[1] for p in global_positions]
-        ax1.scatter(gx, gy, c='red', s=15)
-    
-    # Row 2: Camera Views.
-    gs_cam = gridspec.GridSpecFromSubplotSpec(2, 3, subplot_spec=gs[2])
+    # Row 1: Camera Views
+    gs_cam = gridspec.GridSpecFromSubplotSpec(2, 3, subplot_spec=gs[1])
     for i in range(NUM_CAMERAS):
         ax_cam = fig.add_subplot(gs_cam[i])
         feed = data[i]
         xs = [d[4] for d in feed]
         ys = [0 for _ in feed]
-        ax_cam.scatter(xs, ys, c='blue', s=10)
-        ax_cam.set_title(f"Cam {i+1} View")
+        ax_cam.scatter(xs, ys, c='cyan', s=10)
+        ax_cam.set_title(f"Cam {i+1} View", color='white')
         ax_cam.set_xlim(-math.pi/2, math.pi/2)
         ax_cam.set_ylim(-0.1, 0.1)
         ax_cam.set_xticks([])
         ax_cam.set_yticks([])
     
-    # Row 3: Camera Placements and Running Stats/Store Advice.
-    gs_bot = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[3])
-    ax2 = fig.add_subplot(gs_bot[0])
-    ax2.set_title("Camera Placements")
-    ax2.set_xlabel("X")
-    ax2.set_ylabel("Y")
-    ax2.set_xlim(0, 10)
-    ax2.set_ylim(0, 10)
-    cxs = [c[0] for c in cams]
-    cys = [c[1] for c in cams]
-    ax2.scatter(cxs, cys, c='purple', marker='s')
-    for i, (cx, cy, hd) in enumerate(cams):
-        dx = math.cos(hd)*0.5
-        dy = math.sin(hd)*0.5
-        ax2.arrow(cx, cy, dx, dy, head_width=0.2, head_length=0.2, fc='black', ec='black')
-        ax2.text(cx, cy, f"Cam {i+1}", fontsize=8, color='black')
-    
-    ax3 = fig.add_subplot(gs_bot[1])
-    ax3.axis('off')
-    stats_text = (
-      f"Time: {time_str}\n\n"
-      f"Latest Latency: {lat:.3f}s\nAccuracy: {acc:.1f}%\n\n"
-      f"Running Avg Latency: {avg_delay:.3f}s\nRunning Avg Accuracy: {avg_acc:.1f}%\n\n"
-      f"Current Store Counts: {current_counts}"
-    )
-    ax3.text(0.5, 0.5, stats_text, ha='center', va='center', fontsize=12)
-    
-    buf = io.BytesIO()
     plt.tight_layout()
-    plt.savefig(buf, format='png')
+    
+    # Save plot to base64
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', facecolor='black', edgecolor='none')
     buf.seek(0)
     b64 = base64.b64encode(buf.getvalue()).decode()
     plt.close(fig)
     
+    # Updated HTML with dark theme
     html = f"""
     <html>
       <head>
         <title>Dashboard</title>
-        <meta http-equiv="refresh" content="1">
+        <meta http-equiv="refresh" content="0.00001">
+        <style>
+          body {{
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            min-height: 100vh;
+          }}
+          .container {{
+            max-width: 1000px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+          }}
+          h1 {{
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin: 20px 0;
+            color: #ffffff;
+          }}
+          .stats-box {{
+            background: #2d2d2d;
+            border-radius: 16px;
+            padding: 20px 40px;
+            text-align: center;
+            width: fit-content;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          }}
+          .dashboard-image {{
+            width: 100%;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+          }}
+          .button-container {{
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+          }}
+          .button {{
+            background: #0066cc;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+          }}
+          .button:hover {{
+            background: #0052a3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+          }}
+          .time {{
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+          }}
+          .latency {{
+            font-size: 1rem;
+            opacity: 0.9;
+          }}
+        </style>
       </head>
       <body>
-        <h1>Dashboard</h1>
-        <p>Time: {time_str}<br>
-           Latency: {lat:.3f}s, Accuracy: {acc:.1f}%<br>
-           Avg Latency: {avg_delay:.3f}s, Avg Accuracy: {avg_acc:.1f}%<br>
-           Current Store Counts: {current_counts}</p>
-        <p><a href="/store-advice">Get Detailed Store Advice</a></p>
-        <img src="data:image/png;base64,{b64}" alt="Dashboard">
+        <div class="container">
+          <h1>Dashboard</h1>
+          <div class="stats-box">
+            <div class="time">Time: {time_str}</div>
+            <div class="latency">Latency: {lat:.3f}s</div>
+            <div class="button-container">
+              <a href="/store-advice" class="button">Get Store Advice</a>
+            </div>
+          </div>
+          <div class="dashboard-image">
+            <img src="data:image/png;base64,{b64}" alt="Dashboard" style="width: 100%; display: block;">
+          </div>
+        </div>
       </body>
     </html>
     """
@@ -325,20 +378,135 @@ def store_advice():
                         count += 1
         hist = store_history.get(store_number - 1, [])
         advice = get_detailed_store_advice(store_number, count, hist)
-        return f"<h1>Advice for Store {store_number}</h1><p>{advice}</p><p><a href='/store-advice'>Go Back</a></p>"
+        return f"""
+        <html>
+          <head>
+            <title>Store Advice</title>
+            <style>
+              body {{
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                background-color: #1a1a1a;
+                color: #ffffff;
+              }}
+              .container {{
+                max-width: 800px;
+                width: 100%;
+                text-align: center;
+              }}
+              .advice-box {{
+                background: #2d2d2d;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+              }}
+              a {{
+                display: inline-block;
+                background: #0066cc;
+                color: white;
+                padding: 10px 20px;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 10px 5px;
+              }}
+              a:hover {{
+                background: #0052a3;
+              }}
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Advice for Store {store_number}</h1>
+              <div class="advice-box">
+                <p>{advice}</p>
+              </div>
+              <div>
+                <a href="/store-advice">Back</a>
+                <a href="/">Back to Dashboard</a>
+              </div>
+            </div>
+          </body>
+        </html>
+        """
     else:
         options = "".join([f"<option value='{i+1}'>Store {i+1}</option>" for i in range(NUM_STORES)])
         return f"""
         <html>
-          <head><title>Store Advice</title></head>
+          <head>
+            <title>Store Advice</title>
+            <style>
+              body {{
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                background-color: #1a1a1a;
+                color: #ffffff;
+              }}
+              .container {{
+                max-width: 600px;
+                width: 100%;
+                text-align: center;
+              }}
+              .form-box {{
+                background: #2d2d2d;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+              }}
+              select {{
+                width: 200px;
+                padding: 8px;
+                margin: 10px 0;
+                border-radius: 4px;
+                border: 1px solid #444;
+                background: #333;
+                color: white;
+              }}
+              input[type="submit"] {{
+                background: #0066cc;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                cursor: pointer;
+                margin: 10px 0;
+              }}
+              input[type="submit"]:hover {{
+                background: #0052a3;
+              }}
+              a {{
+                display: inline-block;
+                background: #0066cc;
+                color: white;
+                padding: 10px 20px;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 10px 0;
+              }}
+              a:hover {{
+                background: #0052a3;
+              }}
+            </style>
+          </head>
           <body>
-            <h1>Get Detailed Store Advice</h1>
-            <form method="post">
-              <label>Store:</label>
-              <select name="store_number">{options}</select>
-              <input type="submit" value="Get Advice">
-            </form>
-            <p><a href="/">Back to Dashboard</a></p>
+            <div class="container">
+              <h1>Get Store Advice</h1>
+              <div class="form-box">
+                <form method="post">
+                  <label>Select Store:</label><br>
+                  <select name="store_number">{options}</select><br>
+                  <input type="submit" value="Get Advice">
+                </form>
+              </div>
+              <a href="/">Back to Dashboard</a>
+            </div>
           </body>
         </html>
         """
