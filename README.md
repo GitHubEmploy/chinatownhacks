@@ -1,3 +1,11 @@
 # Chinatown Hacks
 
-- Version control for collaborative code from SF Chinatown Hacks hackathon!
+## What is it?
+
+- ChinatownHacks is a high-school level hackathon hosted in San Francisco for the first time.
+
+## Our program:
+
+- Me and my partner [Aahil](https://github.com/The007Programmer) worked on a project to help local businesses and restaurants in the San Francisco Chinatown as part of our submission for this hackathon!
+
+- More details will be released after the hackathon has been completed.
