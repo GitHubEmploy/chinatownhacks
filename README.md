@@ -12,6 +12,6 @@
 
 
 ## TO BE DONE
-- create yolo POC
-- create slides
-- rewrite to PTX
+- ~~create yolo POC~~ (TBD: UPLOAD)
+- ~~create slides~~
+- ~~rewrite to PTX~~
